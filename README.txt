@@ -1,169 +1,197 @@
-# StageFlow IA
+# StageFlow
 
-Sistema em Python para gerar documentos de estágio em DOCX a partir de uma
-mensagem padronizada de WhatsApp.
+Aplicação local para identificar, revisar, calcular e preencher documentos de
+estágio em DOCX. O sistema não escreve conteúdo acadêmico: introdução,
+desenvolvimento das atividades, conclusão e referências permanecem em branco
+para edição manual.
 
-O pipeline atual é local e determinístico. Ele não usa Ollama, modelos de
-linguagem ou APIs externas para escrever as atividades.
+## Fluxo
 
-## Fluxo principal
+1. Cole na interface a mensagem recebida do aluno.
+2. Regras locais identificam primeiro os campos padronizados.
+3. O Ollama usa o contexto completo para organizar os campos ainda vazios, mesmo
+   quando as respostas estão em linhas soltas, fora de ordem ou sem rótulos.
+4. Revise separadamente os dados que deveriam vir do aluno.
+5. Consulte ou reutilize a empresa cadastrada pelo CNPJ.
+6. Selecione curso, situação regular ou DP, módulo e área.
+7. Informe a data inicial; o sistema calcula todos os dias até fechar a carga.
+8. Cole as atividades ou clique em "Sugerir atividades com IA local", revise a prévia
+   e use as sugestões que fizerem sentido. Distribua as horas por peso ou manualmente.
+9. Confirme a revisão e gere relatório, plano e termo de compromisso.
+
+A geração fica bloqueada enquanto houver campos obrigatórios ausentes, carga
+inválida ou atividades sem fechar o total do módulo. Sugestões de dados do aluno
+feitas pela IA sempre mostram o trecho de origem e nunca são usadas para
+inventar dados ausentes.
+
+## Regras acadêmicas e calendário
+
+O módulo regular é calculado pelo curso e semestre. Farmácia possui os módulos I
+a VI entre o 3º e o 8º semestre, com cargas de 130h, 130h, 130h, 140h, 150h e
+160h. Biomedicina possui módulo I no 7º semestre (320h) e módulo II no 8º (360h).
+Em dependência, o módulo é escolhido manualmente e independe do semestre atual.
+
+O calendário usa por padrão segunda a sexta-feira, das 08h00 às 14h00. Ele:
+
+- limita o estágio a 6 horas diárias e 30 horas semanais;
+- sugere feriados nacionais e estaduais conforme a UF da empresa;
+- aceita feriados municipais e outras exclusões informadas manualmente;
+- calcula a data final, os dias efetivamente trabalhados e a carga semanal;
+- reduz apenas o último dia para fechar exatamente a carga do módulo.
+
+Horário e dias da semana podem ser alterados em `Ajustar horário ou calendário`.
+
+## Empresas e histórico de atividades
+
+Os dados públicos da empresa são salvos localmente em `data/stageflow.db`, usando
+o CNPJ como identificador. Em uma nova demanda com o mesmo CNPJ, use `Buscar no
+cadastro local`. O botão `Abrir consulta oficial` facilita a conferência de uma
+empresa ainda não cadastrada.
+
+O mesmo banco registra os títulos das atividades depois que os documentos são
+gerados. Atividades iguais ou muito semelhantes na mesma área produzem um aviso.
+Na etapa de atividades, informe a quantidade e escolha um modelo do Ollama.
+"Sugerir atividades com IA local" executa uma chamada independente, somente ao
+clicar: envia curso, módulo, área, quantidade e até 30 títulos recentes, sem os
+dados pessoais ou a mensagem do aluno. A resposta é apenas uma lista de títulos.
+Atividades-base podem se repetir entre alunos; a combinação e os títulos devem
+ser variados. A prévia não substitui o que já foi preenchido. Só "Usar estas
+sugestões" aplica os títulos ao campo editável e reinicia a distribuição de horas
+e a confirmação final. Falhas da IA preservam o preenchimento manual.
+O prompt copiável para o ChatGPT continua disponível. O StageFlow distribui as
+horas, mas não escreve o texto acadêmico. As sugestões não comprovam atividades
+realizadas: confira a compatibilidade e confirme a experiência real do aluno.
+
+## Execução rápida
+
+Pré-requisitos:
+
+- Windows com WSL/Ubuntu;
+- Ollama aberto no Windows;
+- ao menos um modelo instalado no Ollama;
+- ambiente `.venv` do projeto com as dependências instaladas.
+
+Na primeira execução ou após atualizar as dependências, estando no WSL:
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+Se o seu terminal mostra `bash` ou `zsh`, abra a interface com:
+
+```bash
+./executar.sh
+```
+
+Se estiver usando o PowerShell do Windows, use:
+
+```powershell
+.\executar.ps1
+```
+
+O navegador abrirá em `http://localhost:8501`. Mantenha o terminal aberto
+enquanto estiver usando o sistema e pressione `Ctrl+C` para encerrá-lo. Para
+usar outra porta no WSL, execute `STAGEFLOW_PORT=8502 ./executar.sh`.
+
+## Ollama
+
+O modelo padrão é `qwen3:8b`. A interface lista automaticamente os modelos
+instalados e permite escolher outro. A configuração também pode ser alterada por
+variáveis de ambiente:
 
 ```text
-data/mensagem_zap.txt
-  -> WhatsAppParser
-  -> InputValidator
-  -> DataEnricher
-  -> resolução da área de estágio
-  -> seleção determinística de atividades
-  -> composição e validação dos relatos
-  -> validação de originalidade
-  -> preenchimento dos templates DOCX
-  -> output/docx/
+STAGEFLOW_OLLAMA_MODEL=qwen3:8b
+OLLAMA_HOST=http://localhost:11434
 ```
 
-O mesmo conjunto de dados produz a mesma seleção e a mesma variante textual.
-Alunos ou módulos diferentes recebem combinações distintas. O registro local
-de originalidade armazena apenas impressões digitais dos textos anteriores.
+O StageFlow usa a API local do Ollama. A mensagem bruta não é enviada para
+serviços externos nem gravada pelo aplicativo. Depois da geração, os documentos
+são salvos em `output/docx` e o cadastro confirmado da empresa e o histórico de
+atividades ficam no banco local `data/stageflow.db`.
 
-## Áreas disponíveis
+## Linha de comando
 
-- Biomedicina estética
-- Farmácia em drogaria
-- Farmácia hospitalar
-- Farmácia de manipulação
-- Farmácia em controle de qualidade
-
-Todas as knowledge bases seguem o contrato enriquecido com fatos permitidos,
-papel do estagiário e restrições de validação. A composição mantém o estudante
-como observador ou auxiliar sob supervisão e rejeita afirmações clínicas não
-autorizadas.
-
-As citações e referências bibliográficas são resolvidas a partir dos catálogos
-verificados em `knowledge_base/references/`. Todas as cinco áreas disponíveis
-possuem catálogo próprio, e cada atividade referencia ao menos uma fonte real.
-
-## Requisitos
-
-- Python 3.10 ou superior
-- `python-docx==1.2.0`
-
-Instalação:
+A interface é o fluxo principal. Para processar uma mensagem padronizada sem
+abrir o navegador no PowerShell:
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+.\gerar.ps1
 ```
 
-## Execução
+No WSL, o equivalente é:
 
-1. Copie `data/mensagem_zap.example.txt` para `data/mensagem_zap.txt`.
-2. Substitua todos os dados fictícios pelos dados do estágio.
-3. Execute, a partir da raiz do projeto:
+```bash
+./gerar.sh
+```
+
+Opções úteis:
 
 ```powershell
-python src\pipeline_whatsapp_docx.py --input data\mensagem_zap.txt --output output\docx
+.\gerar.ps1 -SemIA
+.\gerar.ps1 -Modelo llama3.1:8b
+.\gerar.ps1 -Saida output/demandas/aluno_exemplo
+.\gerar.ps1 -Sobrescrever
 ```
 
-O pipeline mantém os dados pessoais apenas em memória e grava os três documentos
-em `output/docx/`. A entrada real e os documentos gerados são ignorados pelo Git.
-Use `--quantidade 1`, `2` ou `3` para alterar o número de atividades. Erros de
-entrada, composição ou preenchimento interrompem a execução com código de saída
-não zero, sem publicar documentos parciais. Por padrão, o pipeline recusa
-substituir documentos existentes. Use `--overwrite` somente após conferir que a
-demanda anterior pode ser substituída.
+No WSL, as opções seguem o formato da linha de comando, por exemplo:
 
-## Operação de demandas reais
-
-Use uma pasta de saída exclusiva por demanda para manter os documentos e o
-registro de originalidade organizados:
-
-```powershell
-python src\pipeline_whatsapp_docx.py `
-  --input data\mensagem_zap.txt `
-  --output output\demandas\identificador_da_demanda
+```bash
+./gerar.sh --sem-ia
+./gerar.sh --model llama3.1:8b
+./gerar.sh --output output/demandas/aluno_exemplo --overwrite
 ```
 
-Antes da entrega, confira:
+## Campos e validações
 
-- nome, RA, curso, área e módulo do estágio;
-- empresa, supervisor, datas e carga horária;
-- quantidade e pertinência das atividades selecionadas;
-- citações no texto e referências bibliográficas correspondentes;
-- ausência de placeholders, páginas vazias ou conteúdo cortado;
-- abertura dos três arquivos DOCX gerados.
+Os dados são agrupados em aluno, dados acadêmicos, empresa, responsável técnico,
+estágio e seguro. O sistema verifica:
 
-Para regenerar conscientemente os mesmos destinos, acrescente `--overwrite`.
-
-Campos textuais longos podem continuar em linhas recuadas:
-
-```text
-História da empresa: Primeiro parágrafo ou linha.
-  Continuação do mesmo campo.
-```
+- presença dos 39 campos obrigatórios finais;
+- formato de CPF, CNPJ, e-mails e datas;
+- ordem cronológica das datas;
+- cobertura do seguro durante o estágio;
+- compatibilidade entre área, conselho e cargo profissional;
+- duplicidades e trechos não reconhecidos da mensagem;
+- placeholders no corpo, tabelas, cabeçalhos, rodapés e caixas de texto.
 
 ## Estrutura
 
 ```text
 stageflow_ia/
-|-- data/
-|   |-- mensagem_zap.example.txt
-|   `-- mensagem_zap.txt              # local, ignorado pelo Git
-|-- knowledge_base/
-|   |-- references/
-|   `-- *.json
-|-- src/
-|   |-- pipeline_whatsapp_docx.py
-|   |-- activity_pipeline.py
-|   |-- activity_deterministic_composer.py
-|   |-- activity_draft_validator.py
-|   |-- activity_originality.py
-|   |-- activity_bibliography.py
-|   `-- document_generator.py
+|-- .streamlit/config.toml
+|-- data/mensagem_zap.example.txt
+|-- src/stageflow/
+|   |-- academics.py       # módulos e cargas por curso/semestre
+|   |-- activities.py      # distribuição e prompt de atividades
+|   |-- scheduling.py      # calendário e feriados
+|   |-- repository.py      # empresas e histórico no SQLite local
+|   |-- fields.py          # catálogo único dos campos
+|   |-- models.py          # objetos de domínio
+|   |-- extraction.py      # regras, Ollama e estratégia híbrida
+|   |-- validation.py      # erros e avisos determinísticos
+|   |-- enrichment.py      # datas e campos derivados
+|   |-- template_engine.py # substituição de placeholders
+|   |-- documents.py       # geração transacional dos três DOCX
+|   |-- workflow.py        # caso de uso independente da interface
+|   |-- ui.py              # interface Streamlit
+|   `-- cli.py             # linha de comando
 |-- templates/
-|   |-- biomedicina/
-|   `-- farmacia/
 |-- tests/
+|-- executar.ps1
+|-- executar.sh
+|-- gerar.ps1
+|-- gerar.sh
 `-- requirements.txt
 ```
 
-## Garantias da geração
-
-- 4 a 6 parágrafos e 420 a 700 palavras por atividade.
-- Aberturas, estruturas e tamanhos de parágrafo variáveis.
-- Uso exclusivo dos fatos autorizados pela knowledge base.
-- Validações estruturais, estilísticas e clínicas determinísticas.
-- Uma recomposição determinística no máximo em caso de similaridade excessiva.
-- Falha explícita quando uma atividade não puder ser composta e validada.
-- Verificação de placeholders no corpo, tabelas, cabeçalhos e rodapés.
-- Publicação conjunta dos três DOCX somente após a geração completa.
-- Referências listadas no documento somente quando citadas no texto.
-
-## Validação
+## Testes
 
 ```powershell
-$env:PYTHONPATH = "src"
-python -m unittest discover -s tests -v
-python -m compileall -q src tests
+wsl.exe -d Ubuntu -- bash -lc 'cd /mnt/d/Projetos/stageflow_ia && PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v'
 ```
 
-O GitHub Actions executa a mesma suíte em cada `push` e `pull_request`.
-
-## Homologação de originalidade
-
-Para avaliar todas as áreas em lote, sem gravar os relatos gerados:
+Também é possível validar a compilação:
 
 ```powershell
-python src\originality_audit.py --reports-per-area 25
+wsl.exe -d Ubuntu -- bash -lc 'cd /mnt/d/Projetos/stageflow_ia && .venv/bin/python -m compileall -q src tests'
 ```
-
-A auditoria percorre todas as atividades nos três perfis narrativos, desconsidera
-citações e frases técnicas fixas da knowledge base no cálculo ajustado e exige
-relatórios, atividades, aberturas e parágrafos únicos. O limite padrão de
-similaridade Jaccard ajustada é `0.65`. O arquivo
-`output/originality_audit.json` contém somente áreas, contagens, máximos de
-similaridade e resultado de aprovação; nenhum texto ou dado pessoal é salvo.
-
-Antes de publicar uma nova knowledge base, toda atividade deve passar por
-`parse_activity_collection`, possuir ao menos um item em `referencias_ids` e
-usar somente IDs existentes no catálogo correspondente.

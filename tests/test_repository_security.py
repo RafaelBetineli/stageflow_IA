@@ -4,7 +4,7 @@ from pathlib import Path
 
 from docx import Document
 
-from document_generator import DocumentGenerator
+from stageflow.template_engine import DocumentGenerator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +17,7 @@ class RepositorySecurityTests(unittest.TestCase):
         paths = [
             *PROJECT_ROOT.glob("*.txt"),
             PROJECT_ROOT / "data" / "mensagem_zap.example.txt",
-            *(PROJECT_ROOT / "src").glob("*.py"),
+            *(PROJECT_ROOT / "src").rglob("*.py"),
         ]
         matches = [
             (path, email)

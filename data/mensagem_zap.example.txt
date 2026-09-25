@@ -12,6 +12,7 @@ CEP aluno: 00000-000
 Semestre: 8º semestre
 Campus: Campus Exemplo
 Período: Noturno
+Curso: Farmácia
 Número da apólice: 000000000
 Seguradora: Seguradora Exemplo
 Data início vigência: 01/01/2026
@@ -23,6 +24,7 @@ Ramo empresa: Serviços farmacêuticos
 Endereço empresa: Avenida Exemplo, 200
 Bairro empresa: Centro
 Cidade empresa: Cidade Exemplo
+Estado empresa: SP
 Telefone empresa: (00) 0000-0000
 Nome RT: Responsável Técnico Exemplo
 E-mail RT: responsavel@example.invalid
@@ -38,9 +40,4 @@ Horário de estágio: 08h às 14h
 Módulo estágio: Estágio Supervisionado
 Dependência: Não
 Histórico dos módulos: Não se aplica
-História da empresa: Empresa de exemplo utilizada exclusivamente para validar a geração dos documentos.
-  O texto pode continuar em linhas recuadas sem repetir o nome do campo.
-Descrição da área: Setor de exemplo no qual o estudante acompanhou atividades compatíveis com a área informada.
-Relato de caso: Não se aplica.
-Interações medicamentosas: Não se aplica.
 Observações do plano: Atividades realizadas sob supervisão direta do responsável técnico.
