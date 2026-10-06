@@ -20,7 +20,56 @@ class OllamaError(RuntimeError):
 
 
 class RuleBasedExtractor:
-    """Extrai campos rotulados e mantém diagnósticos do que não reconheceu."""
+    """Extrai campos rotulados e mantém diagnósticos do que não reconheceu.
+
+    Suporta dois formatos de entrada:
+    - ``Rótulo: Valor``  (padrão com dois-pontos)
+    - ``- Rótulo Valor`` (lista com marcador — hífen, bala ou asterisco)
+
+    No segundo formato o marcador inicial é removido e o trecho de texto é
+    comparado contra todos os aliases do catálogo (do mais longo para o mais
+    curto) para identificar o campo e extrair o valor restante.
+    """
+
+    # Aliases ordenados do mais longo para o mais curto, para que aliases
+    # compostos como "Nome completo" tenham precedência sobre "Nome".
+    _SORTED_ALIASES: tuple[tuple[str, str], ...] = tuple(
+        sorted(LABEL_TO_KEY.items(), key=lambda pair: len(pair[0]), reverse=True)
+    )
+    # Marcadores de lista reconhecidos no início da linha (após espaços).
+    _BULLET_RE: re.Pattern[str] = re.compile(r"^[\-\•\*\>]\s+")
+
+    # Valores que são apenas anotações parentéticas do rótulo, não dados reais.
+    _PAREN_ONLY_RE: re.Pattern[str] = re.compile(r"^\(.*\)$")
+
+    @classmethod
+    def _match_bullet_line(cls, stripped: str) -> tuple[str, str] | None:
+        """Tenta identificar um campo em linhas do tipo '- Rótulo Valor'.
+
+        Retorna ``(key, value)`` se encontrar um alias como prefixo, ou
+        ``None`` quando nenhum alias bate.  O valor pode ser vazio quando
+        o rótulo está presente mas o campo não foi preenchido, ou quando o
+        "valor" é apenas uma anotação parentética do rótulo (ex: "(RT)").
+        """
+        m = cls._BULLET_RE.match(stripped)
+        if not m:
+            return None
+        rest = stripped[m.end():]          # texto após o marcador e espaços
+        rest_normalized = normalize_label(rest)
+        for alias_normalized, key in cls._SORTED_ALIASES:
+            if rest_normalized == alias_normalized:
+                # Rótulo sem valor (campo em branco no formulário)
+                return key, ""
+            if rest_normalized.startswith(alias_normalized + " "):
+                value_start = len(alias_normalized) + 1  # +1 pelo espaço
+                # Recupera o valor a partir da posição original (sem casefold)
+                value = rest[value_start:].strip()
+                # Rejeita valores que são apenas anotações do rótulo: "(RT)", "(CRF, Coren...)"
+                if cls._PAREN_ONLY_RE.match(value):
+                    return key, ""
+                return key, value
+        return None
+
 
     def extract(self, text: str) -> ExtractionResult:
         fields: dict[str, str] = {}
@@ -33,6 +82,23 @@ class RuleBasedExtractor:
             if not raw_line.strip():
                 continue
 
+            # ── formato lista: "- Rótulo Valor" ────────────────────────────
+            bullet_match = self._match_bullet_line(raw_line.strip())
+            if bullet_match is not None:
+                key, value = bullet_match
+                if value:  # ignora linhas em branco (campo não preenchido)
+                    if key in fields and fields[key] != value:
+                        duplicates.append(FIELD_BY_KEY[key].label)
+                        last_key = None
+                    else:
+                        fields[key] = value
+                        evidence[key] = FieldEvidence(key, value, raw_line.strip(), "regra")
+                        last_key = key
+                else:
+                    last_key = None
+                continue
+
+            # ── formato clássico: "Rótulo: Valor" ───────────────────────────
             if ":" not in raw_line:
                 if last_key and raw_line[:1].isspace():
                     continuation = raw_line.strip()

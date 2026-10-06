@@ -70,6 +70,8 @@ class DocumentGenerator:
         required = self._collect_placeholders(doc)
         missing = sorted(required - set(data))
         if missing:
+            print("CHAVES EM DATA:", sorted(data))
+            print("PLACEHOLDERS DO DOC:", sorted(required))
             raise MissingPlaceholderValueError(
                 "Valores ausentes para os placeholders: " + ", ".join(missing)
             )
