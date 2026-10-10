@@ -1,6 +1,6 @@
 import unittest
 
-from stageflow.academics import AcademicRules, max_activities
+from stageflow.academics import AcademicRules, max_activities, min_activities
 
 
 class AcademicRulesTests(unittest.TestCase):
@@ -30,8 +30,10 @@ class AcademicRulesTests(unittest.TestCase):
             self.rules.regular("Farmácia", "2º semestre")
 
     def test_activity_limit_matches_document_templates(self) -> None:
-        self.assertEqual(3, max_activities("Farmácia"))
-        self.assertEqual(8, max_activities("Biomedicina"))
+        for course in ("Farmácia", "Biomedicina"):
+            with self.subTest(course=course):
+                self.assertEqual(3, min_activities(course))
+                self.assertEqual(10, max_activities(course))
 
 
 if __name__ == "__main__":

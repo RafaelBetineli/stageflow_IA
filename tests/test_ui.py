@@ -97,13 +97,14 @@ class UserInterfaceTests(unittest.TestCase):
     def test_activity_cards_show_current_hours_and_escape_titles(self) -> None:
         app = self._open_activity_planner()
         next(field for field in app.text_area if field.label.startswith("Atividades escolhidas")).input(
-            "Conferência <medicamentos>\nControle de estoque"
+            "Conferência <medicamentos>\nControle de estoque\nOrientação ao paciente"
         ).run()
 
         self.assertEqual(0, len(app.exception))
         markup = "\n".join(element.value for element in app.markdown)
         self.assertIn("Conferência &lt;medicamentos&gt;", markup)
-        self.assertEqual(2, markup.count('<div class="sf-hours"><strong>80h</strong>'))
+        self.assertEqual(1, markup.count('<div class="sf-hours"><strong>54h</strong>'))
+        self.assertEqual(2, markup.count('<div class="sf-hours"><strong>53h</strong>'))
         self.assertIn("160 / 160h", markup)
         next(field for field in app.checkbox if field.label == "Ajustar as horas diretamente").check().run()
         next(field for field in app.number_input if field.label == "Horas — atividade 1").set_value(100).run()
@@ -113,6 +114,18 @@ class UserInterfaceTests(unittest.TestCase):
         self.assertIn("Horas definidas", markup)
         self.assertIn('class="sf-total invalid"', markup)
         self.assertEqual((), app.session_state["sf_allocations"])
+
+    def test_requires_at_least_three_manual_activities(self) -> None:
+        app = self._open_activity_planner()
+        next(field for field in app.text_area if field.label.startswith("Atividades escolhidas")).input(
+            "Atividade um\nAtividade dois"
+        ).run()
+
+        self.assertEqual((), app.session_state["sf_allocations"])
+        self.assertIn(
+            "Informe pelo menos 3 atividades distintas.",
+            [message.value for message in app.error],
+        )
 
     def test_suggestions_require_click_and_confirmation_before_replacing_titles(self) -> None:
         os.environ["OLLAMA_HOST"] = "http://127.0.0.1:9/preview-test"
@@ -151,7 +164,7 @@ class UserInterfaceTests(unittest.TestCase):
         ) as suggest:
             app = self._open_activity_planner()
             next(field for field in app.text_area if field.label.startswith("Atividades escolhidas")).input(
-                "Atividade manual"
+                "Atividade manual\nAtividade auxiliar\nAtividade complementar"
             ).run()
             next(field for field in app.number_input if field.label == "Peso").set_value(9).run()
             next(field for field in app.checkbox if field.label == "Ajustar as horas diretamente").check().run()
@@ -159,7 +172,10 @@ class UserInterfaceTests(unittest.TestCase):
             before = app.session_state["sf_data"].copy()
             next(button for button in app.button if button.label == "Sugerir atividades com IA local").click().run()
             self.assertEqual(0, len(app.exception))
-            self.assertEqual("Atividade manual", app.session_state["sf_activity_text"])
+            self.assertEqual(
+                "Atividade manual\nAtividade auxiliar\nAtividade complementar",
+                app.session_state["sf_activity_text"],
+            )
             self.assertEqual(before, app.session_state["sf_data"])
             self.assertEqual(9, app.session_state["sf_activity_weight_1"])
             self.assertEqual(100, app.session_state["sf_activity_hours_1"])
@@ -179,10 +195,10 @@ class UserInterfaceTests(unittest.TestCase):
         ) as suggest:
             app = self._open_activity_planner()
             next(button for button in app.button if button.label == "Sugerir atividades com IA local").click().run()
-            next(field for field in app.number_input if field.label == "Quantidade de atividades para sugerir").set_value(2).run()
+            next(field for field in app.number_input if field.label == "Quantidade de atividades para sugerir").set_value(4).run()
             self.assertEqual((), app.session_state["sf_activity_suggestions"])
             suggest.assert_called_once()
-            suggest.return_value = ("A", "B")
+            suggest.return_value = ("A", "B", "C", "D")
             next(button for button in app.button if button.label == "Sugerir atividades com IA local").click().run()
             next(button for button in app.button if button.label == "Descartar sugestões").click().run()
             self.assertEqual(0, len(app.exception))
@@ -195,10 +211,10 @@ class UserInterfaceTests(unittest.TestCase):
         button = next(button for button in app.button if button.label == "Sugerir atividades com IA local")
         self.assertTrue(button.disabled)
         next(field for field in app.text_area if field.label.startswith("Atividades escolhidas")).input(
-            "Atividade manual"
+            "Atividade manual\nAtividade auxiliar\nAtividade complementar"
         ).run()
         self.assertEqual(0, len(app.exception))
-        self.assertEqual(1, len(app.session_state["sf_allocations"]))
+        self.assertEqual(3, len(app.session_state["sf_allocations"]))
 
     def test_calculated_role_updates_when_course_changes(self) -> None:
         app = AppTest.from_file(str(APP), default_timeout=20).run()

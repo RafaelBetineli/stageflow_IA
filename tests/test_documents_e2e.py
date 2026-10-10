@@ -122,7 +122,17 @@ class DocumentServiceEndToEndTests(unittest.TestCase):
                 any(text.endswith("CRF") for text in paragraphs if text.startswith("SIGLA DO CONSELHO"))
             )
             self.assertIn("Nº DE INSCRIÇÃO NO CONSELHO: 90909", paragraphs)
-            self.assertTrue(any("Conselho nº CRF 90909" in text for text in paragraphs))
+            self.assertTrue(any("Conselho CRF nº 90909" in text for text in paragraphs))
+            self.assertTrue(
+                any(
+                    "Registro Profissional (CRF, CRBM e etc) CRF nº 90909"
+                    in text
+                    for text in paragraphs
+                )
+            )
+
+            plan = Document(outputs[1])
+            self.assertIn("CRF nº 90909", [paragraph.text for paragraph in plan.paragraphs])
 
             insurer = next(
                 paragraph
@@ -140,7 +150,7 @@ class DocumentServiceEndToEndTests(unittest.TestCase):
             self.assertIn("NUMPAGES", footer_xml)
 
     def test_plan_fills_each_activity_hours_and_total(self) -> None:
-        for area, total, count in (("Estética", 320, 3), ("Estética", 360, 8), ("Drogaria", 130, 3)):
+        for area, total, count in (("Estética", 360, 10), ("Drogaria", 130, 10)):
             with self.subTest(area=area, total=total), tempfile.TemporaryDirectory() as temporary:
                 data = self._data_for_area(area)
                 allocations = ActivityAllocator().allocate(

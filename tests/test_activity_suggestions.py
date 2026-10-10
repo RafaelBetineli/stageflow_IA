@@ -45,12 +45,20 @@ class ActivitySuggestionTests(unittest.TestCase):
                     self.service.suggest(**self.arguments)
 
     def test_rejects_invalid_count_and_module_before_calling_ai(self) -> None:
-        for count in (0, 4, True, 1.5):
+        for count in (0, 1, 2, 11, True, 1.5):
             with self.subTest(count=count), self.assertRaises(ValueError):
                 self.service.suggest(**{**self.arguments, "count": count})
         with self.assertRaises(ValueError):
             self.service.suggest(**{**self.arguments, "module": "Módulo inexistente"})
         self.client.chat.assert_not_called()
+
+    def test_accepts_ten_activities_for_pharmacy(self) -> None:
+        expected = tuple(f"Atividade {position}" for position in range(1, 11))
+        self.client.chat.return_value = json.dumps({"activities": list(expected)})
+
+        result = self.service.suggest(**{**self.arguments, "count": 10})
+
+        self.assertEqual(expected, result)
 
     def test_limits_history_size(self) -> None:
         self.client.chat.return_value = '{"activities": ["A", "B", "C"]}'

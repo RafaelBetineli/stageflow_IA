@@ -46,5 +46,6 @@ def split_professional_council(value: object) -> tuple[str, str]:
     acronym = match.group(1).upper()
     registration = text[match.end() :].strip()
     registration = re.sub(r"^\s*[-/]\s*[A-Z]{2}\b", "", registration, flags=re.IGNORECASE).strip()
-    registration = re.sub(r"^\s*(?:n[º°o]?\.?|número)\s*", "", registration, flags=re.IGNORECASE).strip()
+    registration = re.sub(r"^\s*(?:número|n[º°o]?\.?)\s*", "", registration, flags=re.IGNORECASE).strip()
+    registration = re.sub(r"^\s*[:;#]\s*", "", registration).strip()
     return acronym, registration

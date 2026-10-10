@@ -60,7 +60,21 @@ class DataEnricherTests(unittest.TestCase):
 
         self.assertEqual("CRF", result["SIGLA_CONSELHO_RT"])
         self.assertEqual("90909", result["NUMERO_CONSELHO_RT"])
-        self.assertEqual("CRF 90909", result["CONSELHO_RT_DOCUMENTO"])
+        self.assertEqual("CRF nº 90909", result["CONSELHO_RT_DOCUMENTO"])
+
+    def test_normalizes_council_number_label_and_separator(self) -> None:
+        for informed_value in (
+            "CRF nº: 70590",
+            "CRF n° 70590",
+            "CRF: 70590",
+            "CRF número 70590",
+        ):
+            with self.subTest(informed_value=informed_value):
+                result = DataEnricher().enrich({"CONSELHO_RT": informed_value})
+
+                self.assertEqual("CRF", result["SIGLA_CONSELHO_RT"])
+                self.assertEqual("70590", result["NUMERO_CONSELHO_RT"])
+                self.assertEqual("CRF nº 70590", result["CONSELHO_RT_DOCUMENTO"])
 
 
 if __name__ == "__main__":

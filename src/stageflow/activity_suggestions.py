@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from .academics import AcademicRules, max_activities
+from .academics import AcademicRules, max_activities, min_activities
 from .activities import build_activity_prompt
 from .extraction import OllamaClient, OllamaError
 from .repository import normalize_activity
@@ -24,8 +24,16 @@ class ActivitySuggestionService:
         previous_titles: tuple[str, ...] = (),
     ) -> tuple[str, ...]:
         AcademicRules().for_module(course, module)
-        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= max_activities(course):
-            raise ValueError("Quantidade de atividades fora do limite do curso.")
+        minimum = min_activities(course)
+        maximum = max_activities(course)
+        if (
+            isinstance(count, bool)
+            or not isinstance(count, int)
+            or not minimum <= count <= maximum
+        ):
+            raise ValueError(
+                f"A quantidade de atividades deve ficar entre {minimum} e {maximum}."
+            )
         if not area.strip():
             raise ValueError("Informe a área do estágio.")
         schema = {

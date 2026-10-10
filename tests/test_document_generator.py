@@ -41,6 +41,20 @@ class DocumentGeneratorTests(unittest.TestCase):
             {"ESTADO_ALUNO", "CAMPUS", "PERIODO"}.issubset(placeholders)
         )
 
+    def test_plan_templates_offer_ten_activity_rows(self) -> None:
+        templates = sorted(
+            (PROJECT_ROOT / "templates").glob("*/modelo_plano_*.docx")
+        )
+        for template in templates:
+            document = Document(template)
+            placeholders = DocumentGenerator._collect_placeholders(document)
+            expected = {
+                *(f"TITULO_ATV{position}" for position in range(1, 11)),
+                *(f"CARGA_ATV{position}" for position in range(1, 11)),
+            }
+            with self.subTest(template=template.name):
+                self.assertTrue(expected.issubset(placeholders))
+
     def test_reports_expose_separate_council_fields(self) -> None:
         templates = sorted(
             (PROJECT_ROOT / "templates").glob("*/modelo_relatorio_*.docx")

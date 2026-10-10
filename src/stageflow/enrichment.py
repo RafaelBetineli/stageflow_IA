@@ -36,9 +36,12 @@ class DataEnricher:
         )
         enriched["SIGLA_CONSELHO_RT"] = council_acronym
         enriched["NUMERO_CONSELHO_RT"] = council_registration
-        enriched["CONSELHO_RT_DOCUMENTO"] = " ".join(
-            part for part in (council_acronym, council_registration) if part
-        )
+        if council_acronym and council_registration:
+            enriched["CONSELHO_RT_DOCUMENTO"] = (
+                f"{council_acronym} nº {council_registration}"
+            )
+        else:
+            enriched["CONSELHO_RT_DOCUMENTO"] = council_acronym or council_registration
 
         start = self._parse_date(data.get("DATA_INICIO_ESTAGIO"))
         end = self._parse_date(data.get("DATA_FIM_ESTAGIO"))

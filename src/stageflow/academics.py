@@ -27,6 +27,9 @@ MODULES = (
     ModuleDefinition("Biomedicina", 8, "Módulo II", 360),
 )
 
+MIN_ACTIVITIES = 3
+MAX_ACTIVITIES = 10
+
 
 class AcademicRules:
     COURSES = ("Farmácia", "Biomedicina")
@@ -72,5 +75,10 @@ class AcademicRules:
 
 
 def max_activities(course: str) -> int:
-    """Menor quantidade de atividades suportada pelos modelos do curso."""
-    return 8 if normalize_label(course) == "biomedicina" else 3
+    """Limite comum suportado pelos modelos de todos os cursos."""
+    return MAX_ACTIVITIES
+
+
+def min_activities(course: str) -> int:
+    """Quantidade mínima exigida pela faculdade para todos os cursos."""
+    return MIN_ACTIVITIES

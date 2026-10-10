@@ -20,54 +20,150 @@ class OllamaError(RuntimeError):
 
 
 class RuleBasedExtractor:
-    """Extrai campos rotulados e mantém diagnósticos do que não reconheceu.
+    """Extrai formulários copiados e mensagens parcialmente estruturadas.
 
-    Suporta dois formatos de entrada:
-    - ``Rótulo: Valor``  (padrão com dois-pontos)
-    - ``- Rótulo Valor`` (lista com marcador — hífen, bala ou asterisco)
-
-    No segundo formato o marcador inicial é removido e o trecho de texto é
-    comparado contra todos os aliases do catálogo (do mais longo para o mais
-    curto) para identificar o campo e extrair o valor restante.
+    O formato recebido pelo WhatsApp varia bastante. Por isso a extração não
+    depende da presença de espaços depois de ``:``, aceita Markdown e listas,
+    acompanha as seções de aluno/empresa e reconhece formulários nos quais o
+    valor aparece na linha seguinte ao rótulo.
     """
 
-    # Aliases ordenados do mais longo para o mais curto, para que aliases
-    # compostos como "Nome completo" tenham precedência sobre "Nome".
-    _SORTED_ALIASES: tuple[tuple[str, str], ...] = tuple(
-        sorted(LABEL_TO_KEY.items(), key=lambda pair: len(pair[0]), reverse=True)
+    _BULLET_RE: re.Pattern[str] = re.compile(r"^[\-\u2022\*\>]\s*")
+    _DATE_RE: re.Pattern[str] = re.compile(r"(?<!\d)([0-3]?\d/[01]?\d/\d{4})(?!\d)")
+    _PAREN_RE: re.Pattern[str] = re.compile(r"\([^)]*\)")
+    _CITY_STATE_RE: re.Pattern[str] = re.compile(
+        r"^(?P<city>.+?)\s*[-/]\s*(?P<state>[A-Za-z]{2})$"
     )
-    # Marcadores de lista reconhecidos no início da linha (após espaços).
-    _BULLET_RE: re.Pattern[str] = re.compile(r"^[\-\•\*\>]\s+")
 
-    # Valores que são apenas anotações parentéticas do rótulo, não dados reais.
-    _PAREN_ONLY_RE: re.Pattern[str] = re.compile(r"^\(.*\)$")
+    _SECTION_ALIASES: dict[str, dict[str, str]] = {
+        "aluno": {
+            "nome": "NOME_ALUNO",
+            "telefone": "TELEFONE_ALUNO",
+            "celular": "TELEFONE_ALUNO",
+            "email": "EMAIL_ALUNO",
+            "e mail": "EMAIL_ALUNO",
+            "endereco": "ENDERECO_ALUNO",
+            "cidade": "CIDADE_ALUNO",
+            "bairro": "BAIRRO_ALUNO",
+            "estado": "ESTADO_ALUNO",
+            "uf": "ESTADO_ALUNO",
+            "cep": "CEP_ALUNO",
+        },
+        "empresa": {
+            "nome": "EMPRESA",
+            "telefone": "TELEFONE_EMPRESA",
+            "celular": "TELEFONE_EMPRESA",
+            "contato": "TELEFONE_EMPRESA",
+            "endereco": "ENDERECO_EMPRESA",
+            "cidade": "CIDADE_EMPRESA",
+            "bairro": "BAIRRO_EMPRESA",
+            "estado": "ESTADO_EMPRESA",
+            "uf": "ESTADO_EMPRESA",
+        },
+    }
+    _COMBINED_VALIDITY_LABELS = {
+        "vigencia",
+        "vigencia do seguro",
+        "validade do seguro",
+        "periodo de vigencia",
+    }
 
     @classmethod
-    def _match_bullet_line(cls, stripped: str) -> tuple[str, str] | None:
-        """Tenta identificar um campo em linhas do tipo '- Rótulo Valor'.
+    def _canonical_label(cls, value: str) -> str:
+        value = unicodedata.normalize("NFC", value)
+        value = "".join(
+            character
+            for character in value
+            if unicodedata.category(character) != "Cf"
+        )
+        value = cls._PAREN_RE.sub(" ", value)
+        value = re.sub(r"\bn\s*[º°]", "numero", value, flags=re.IGNORECASE)
+        value = re.sub(r"\bn\s*\.\s*", "numero ", value, flags=re.IGNORECASE)
+        value = re.sub(r"[^\w\s]", " ", value, flags=re.UNICODE)
+        return normalize_label(value)
 
-        Retorna ``(key, value)`` se encontrar um alias como prefixo, ou
-        ``None`` quando nenhum alias bate.  O valor pode ser vazio quando
-        o rótulo está presente mas o campo não foi preenchido, ou quando o
-        "valor" é apenas uma anotação parentética do rótulo (ex: "(RT)").
-        """
-        m = cls._BULLET_RE.match(stripped)
-        if not m:
+    @classmethod
+    def _alias_map(cls) -> dict[str, str]:
+        return {
+            cls._canonical_label(alias): key
+            for alias, key in LABEL_TO_KEY.items()
+        }
+
+    @classmethod
+    def _resolve_label(cls, label: str, section: str | None) -> str | None:
+        normalized = cls._canonical_label(label)
+        contextual = cls._SECTION_ALIASES.get(section or "", {})
+        if normalized in contextual:
+            return contextual[normalized]
+
+        aliases = cls._alias_map()
+        key = aliases.get(normalized)
+        if key:
+            return key
+
+        # Formas como "CNPJ nº" e "RA n°" acrescentam "número" ao rótulo.
+        without_number = re.sub(r"\s+numero$", "", normalized).strip()
+        if without_number != normalized:
+            return contextual.get(without_number) or aliases.get(without_number)
+        return None
+
+    @classmethod
+    def _section_from_line(cls, line: str) -> str | None:
+        normalized = cls._canonical_label(line)
+        if "identificacao" not in normalized and not normalized.startswith("dados"):
             return None
-        rest = stripped[m.end():]          # texto após o marcador e espaços
-        rest_normalized = normalize_label(rest)
-        for alias_normalized, key in cls._SORTED_ALIASES:
-            if rest_normalized == alias_normalized:
-                # Rótulo sem valor (campo em branco no formulário)
+        if "aluno" in normalized:
+            return "aluno"
+        if "empresa" in normalized or "concedente" in normalized:
+            return "empresa"
+        return None
+
+    @classmethod
+    def _is_document_heading(cls, line: str) -> bool:
+        normalized = cls._canonical_label(line)
+        return normalized.startswith("dados necessarios") and (
+            "relatorio" in normalized or "estagio" in normalized
+        )
+
+    @staticmethod
+    def _clean_value(value: str) -> str:
+        # NFC remove caracteres invisíveis sem alterar símbolos legítimos dos
+        # dados, como o indicador ordinal de "nº 100".
+        value = unicodedata.normalize("NFC", value)
+        value = "".join(
+            character
+            for character in value
+            if unicodedata.category(character) != "Cf"
+        )
+        return value.strip().strip("*_`").strip()
+
+    @classmethod
+    def _split_marker(cls, line: str) -> tuple[str, bool]:
+        match = cls._BULLET_RE.match(line)
+        if not match:
+            return line, False
+        return line[match.end():].strip(), True
+
+    @classmethod
+    def _match_prefixed_bullet(
+        cls,
+        content: str,
+        section: str | None,
+    ) -> tuple[str, str] | None:
+        """Reconhece ``- Rótulo valor`` quando não há dois-pontos."""
+        canonical_content = cls._canonical_label(content)
+        candidates: dict[str, str] = cls._alias_map()
+        candidates.update(cls._SECTION_ALIASES.get(section or "", {}))
+        for alias, key in sorted(candidates.items(), key=lambda item: len(item[0]), reverse=True):
+            if canonical_content == alias:
                 return key, ""
-            if rest_normalized.startswith(alias_normalized + " "):
-                value_start = len(alias_normalized) + 1  # +1 pelo espaço
-                # Recupera o valor a partir da posição original (sem casefold)
-                value = rest[value_start:].strip()
-                # Rejeita valores que são apenas anotações do rótulo: "(RT)", "(CRF, Coren...)"
-                if cls._PAREN_ONLY_RE.match(value):
-                    return key, ""
-                return key, value
+            if canonical_content.startswith(alias + " "):
+                # Localiza o fim do rótulo no texto original tolerando apenas
+                # diferenças simples de espaços. Casos mais livres ficam para IA.
+                words = len(alias.split())
+                match = re.match(rf"^\s*(?:\S+\s+){{{words}}}(.*)$", content)
+                if match:
+                    return key, cls._clean_value(match.group(1))
         return None
 
 
@@ -77,61 +173,114 @@ class RuleBasedExtractor:
         unrecognized: list[str] = []
         duplicates: list[str] = []
         last_key: str | None = None
+        pending_key: str | None = None
+        pending_source: str | None = None
+        section: str | None = None
+        derived_keys: set[str] = set()
+
+        def add_field(key: str, value: str, source: str, *, derived: bool = False) -> None:
+            value = self._clean_value(value)
+            if not value:
+                return
+            if key in fields and fields[key] != value:
+                if key in derived_keys and not derived:
+                    fields[key] = value
+                    evidence[key] = FieldEvidence(key, value, source, "regra")
+                    derived_keys.discard(key)
+                else:
+                    duplicates.append(FIELD_BY_KEY[key].label)
+                return
+            fields[key] = value
+            evidence[key] = FieldEvidence(key, value, source, "regra")
+            if derived:
+                derived_keys.add(key)
+
+            if key not in {"CIDADE_ALUNO", "CIDADE_EMPRESA"}:
+                return
+            city_state = self._CITY_STATE_RE.match(value)
+            if not city_state:
+                return
+            city = city_state.group("city").strip()
+            state = city_state.group("state").upper()
+            fields[key] = city
+            evidence[key] = FieldEvidence(key, city, source, "regra")
+            state_key = "ESTADO_ALUNO" if key == "CIDADE_ALUNO" else "ESTADO_EMPRESA"
+            if state_key not in fields:
+                add_field(state_key, state, source, derived=True)
 
         for raw_line in text.splitlines():
             if not raw_line.strip():
                 continue
 
-            # ── formato lista: "- Rótulo Valor" ────────────────────────────
-            bullet_match = self._match_bullet_line(raw_line.strip())
-            if bullet_match is not None:
-                key, value = bullet_match
-                if value:  # ignora linhas em branco (campo não preenchido)
-                    if key in fields and fields[key] != value:
-                        duplicates.append(FIELD_BY_KEY[key].label)
-                        last_key = None
-                    else:
-                        fields[key] = value
-                        evidence[key] = FieldEvidence(key, value, raw_line.strip(), "regra")
-                        last_key = key
+            stripped = raw_line.strip()
+            content, had_marker = self._split_marker(stripped)
+            detected_section = self._section_from_line(content)
+            if detected_section:
+                section = detected_section
+                pending_key = None
+                pending_source = None
+                last_key = None
+                continue
+            if self._is_document_heading(content):
+                continue
+
+            parsed: tuple[str, str] | None = None
+            if ":" in content:
+                raw_label, raw_value = content.split(":", maxsplit=1)
+                normalized_label = self._canonical_label(raw_label)
+                if normalized_label in self._COMBINED_VALIDITY_LABELS:
+                    dates = self._DATE_RE.findall(raw_value)
+                    if len(dates) >= 2:
+                        add_field("DATA_INICIO_VIGENCIA", dates[0], stripped)
+                        add_field("DATA_FIM_VIGENCIA", dates[1], stripped)
+                        pending_key = None
+                        pending_source = None
+                        last_key = "DATA_FIM_VIGENCIA"
+                        continue
+                key = self._resolve_label(raw_label, section)
+                if key:
+                    parsed = key, self._clean_value(raw_value)
+            elif had_marker:
+                parsed = self._match_prefixed_bullet(content, section)
+
+            if parsed is not None:
+                key, value = parsed
+                if value:
+                    add_field(key, value, stripped)
+                    pending_key = None
+                    pending_source = None
+                    last_key = key
                 else:
+                    pending_key = key
+                    pending_source = stripped
                     last_key = None
                 continue
 
-            # ── formato clássico: "Rótulo: Valor" ───────────────────────────
-            if ":" not in raw_line:
-                if last_key and raw_line[:1].isspace():
-                    continuation = raw_line.strip()
-                    if continuation:
-                        fields[last_key] = f"{fields[last_key]}\n{continuation}"
-                        previous = evidence[last_key]
-                        evidence[last_key] = FieldEvidence(
-                            last_key,
-                            fields[last_key],
-                            f"{previous.source}\n{raw_line.strip()}",
-                            "regra",
-                        )
-                else:
-                    unrecognized.append(raw_line.strip())
-                    last_key = None
+            if pending_key:
+                value = self._clean_value(content)
+                if value:
+                    source = f"{pending_source}\n{stripped}" if pending_source else stripped
+                    add_field(pending_key, value, source)
+                    last_key = pending_key
+                pending_key = None
+                pending_source = None
                 continue
 
-            raw_label, raw_value = raw_line.split(":", maxsplit=1)
-            key = LABEL_TO_KEY.get(normalize_label(raw_label))
-            value = raw_value.strip()
-            if key is None:
-                unrecognized.append(raw_line.strip())
-                last_key = None
+            if last_key and raw_line[:1].isspace():
+                continuation = self._clean_value(content)
+                if continuation:
+                    fields[last_key] = f"{fields[last_key]}\n{continuation}"
+                    previous = evidence[last_key]
+                    evidence[last_key] = FieldEvidence(
+                        last_key,
+                        fields[last_key],
+                        f"{previous.source}\n{stripped}",
+                        "regra",
+                    )
                 continue
 
-            if key in fields and fields[key] != value:
-                duplicates.append(FIELD_BY_KEY[key].label)
-                last_key = None
-                continue
-
-            fields[key] = value
-            evidence[key] = FieldEvidence(key, value, raw_line.strip(), "regra")
-            last_key = key
+            unrecognized.append(stripped)
+            last_key = None
 
         return ExtractionResult(
             fields=fields,
@@ -334,10 +483,15 @@ class HybridExtractor:
         candidate_keys = tuple(
             definition.key
             for definition in FIELD_DEFINITIONS
-            if definition.origin == "aluno"
+            if definition.origin not in {"operador", "calculado"}
             and not str(result.fields.get(definition.key, "")).strip()
         )
-        if not use_ai or not text.strip() or not candidate_keys:
+        if (
+            not use_ai
+            or not text.strip()
+            or not candidate_keys
+            or not result.unrecognized_lines
+        ):
             return result
 
         result.ai_used = True

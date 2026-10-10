@@ -13,7 +13,12 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import streamlit as st
 
-from stageflow.academics import AcademicRules, ModuleDefinition, max_activities
+from stageflow.academics import (
+    AcademicRules,
+    ModuleDefinition,
+    max_activities,
+    min_activities,
+)
 from stageflow.activity_suggestions import ActivitySuggestionService
 from stageflow.activities import (
     ActivityAllocator,
@@ -865,6 +870,7 @@ def _activity_section(
     st.subheader("4. Atividades e distribuição de horas")
     course = st.session_state.sf_course
     area = st.session_state.sf_area
+    minimum = min_activities(course)
     maximum = max_activities(course)
     previous = repository.activity_titles(area, limit=30)
     prompt_count_key = "sf_prompt_activity_count_v2"
@@ -875,9 +881,9 @@ def _activity_section(
         del st.session_state[prompt_count_key]
     prompt_count = st.number_input(
         "Quantidade de atividades para sugerir",
-        min_value=1,
+        min_value=minimum,
         max_value=maximum,
-        value=min(3, maximum),
+        value=minimum,
         key=prompt_count_key,
     )
     prompt = build_activity_prompt(
@@ -903,6 +909,10 @@ def _activity_section(
     titles = tuple(dict.fromkeys(line.strip() for line in st.session_state.sf_activity_text.splitlines() if line.strip()))
     if len(titles) > maximum:
         st.error(f"Os modelos de {course} aceitam no máximo {maximum} atividades.")
+        st.session_state.sf_allocations = ()
+        return ()
+    if titles and len(titles) < minimum:
+        st.error(f"Informe pelo menos {minimum} atividades distintas.")
         st.session_state.sf_allocations = ()
         return ()
     if not titles or not definition:
@@ -1003,8 +1013,12 @@ def _final_review_and_generate(
     validation_issues = StageFlow().validate(data)
     errors = tuple(issue for issue in validation_issues if issue.severity == "erro")
     warnings = tuple(issue for issue in validation_issues if issue.severity == "atencao")
-    if not allocations:
-        errors = (*errors, ValidationIssue(None, "Informe ao menos uma atividade."))
+    minimum = min_activities(str(data.get("CURSO", "")))
+    if len(allocations) < minimum:
+        errors = (
+            *errors,
+            ValidationIssue(None, f"Informe pelo menos {minimum} atividades distintas."),
+        )
     summary = st.columns(4)
     filled = sum(bool(data.get(key, "").strip()) for key in REQUIRED_FIELDS)
     summary[0].metric("Campos", f"{filled}/{len(REQUIRED_FIELDS)}")
